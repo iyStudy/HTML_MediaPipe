@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <!-- 3つのライブラリを読み込む -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <style>
+    #input {
+      transform: scaleX(-1);
+    }
+    #result {
+      font-size: 24px;
+      color: blue;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <video id="input"></video>
+    <canvas id="output" width="600" height="400"></canvas>
+    <div id="result">手の形: 未検出、伸びている指の数: 0</div>
+  </div>
+  <button id="start">start</button>
+  <button id="stop">stop</button>
+  
+  <script>
+    const video = document.getElementById('input');
+    const canvas = document.getElementById('output');
+    const ctx = canvas.getContext('2d');
+    const resultDiv = document.getElementById('result');
+
+    // 関連ファイルの読み込み
+    const config = {
+      locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+    };
+    const hands = new Hands(config);
+
+    // カメラからの映像をhands.jsで使えるようにする
+    const camera = new Camera(video, {
+      onFrame: async () => {
+        await hands.send({image: video});
+      },
+      width: 600,
+      height: 400
+    });
+
+    hands.setOptions({
+      maxNumHands: 2,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5
+    });
+
+    // 指が伸びているかを判定する関数
+    function isFingerExtended(landmarks, fingerBaseIndex) {
+      const mcp = landmarks[fingerBaseIndex]; // MCP（中手指節関節）
+      const pip = landmarks[fingerBaseIndex + 1]; // PIP（近位指節間関節）
+      const tip = landmarks[fingerBaseIndex + 2]; // 指先
+
+      // 親指は他の指とは異なる動きをするため、別の判定方法を使用
+      if (fingerBaseIndex === 2) {
+        return mcp && pip && tip && (mcp.x < pip.x) && (pip.x < tip.x);
+      }
+
+      return mcp && pip && tip && (mcp.y > pip.y) && (pip.y > tip.y);
+    }
+
+    // 手の形を判定する関数
+    function analyzeHandPose(landmarks) {
+      let extendedFingers = 0;
+
+      // 各指について伸びているか判定
+      for (let i = 2; i <= 18; i += 4) {
+        if (isFingerExtended(landmarks, i)) {
+          extendedFingers++;
+        }
+      }
+
+      // 伸びている指の数に基づいて手の形を判定
+      let handShape = '不明';
+      if (extendedFingers === 0) {
+        handShape = 'グー';
+      } else if (extendedFingers === 2) {
+        handShape = 'チョキ';
+      } else if (extendedFingers === 5) {
+        handShape = 'パー';
+      }
+
+      return { handShape, extendedFingers };
+    }
+
+    // 形状認識した結果の取得
+    hands.onResults(results => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.save();
+      ctx.scale(-1, 1);
+      ctx.translate(-canvas.width, 0);
+
+      ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+
+      if (results.multiHandLandmarks) {
+        results.multiHandLandmarks.forEach(marks => {
+          drawConnectors(ctx, marks, HAND_CONNECTIONS, { color: '#0f0' });
+          drawLandmarks(ctx, marks, { color: '#f00', radius: 5 });
+
+          // 手の形状と伸びている指の数を分析して結果を表示
+          const { handShape, extendedFingers } = analyzeHandPose(marks);
+          resultDiv.innerText = `手の形: ${handShape}、伸びている指の数: ${extendedFingers}`;
+        });
+      } else {
+        resultDiv.innerText = '手の形: 未検出、伸びている指の数: 0';
+      }
+
+      ctx.restore();
+    });
+
+    // 認識開始・終了ボタン
+    document.getElementById('start').addEventListener('click', () => camera.start());
+    document.getElementById('stop').addEventListener('click', () => camera.stop());
+  </script>
+</body>
+</html>
